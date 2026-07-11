@@ -19,7 +19,7 @@
     --line-2: #34343a;
     --accent: #ffffff;
     --accent-soft: rgba(255, 255, 255, 0.09);
-    --measure: 60rem;
+    --measure: 72rem;
   }
 
   * { box-sizing: border-box; }
@@ -189,6 +189,7 @@
     transition: background 0.15s;
   }
   .card:hover { background: var(--accent-soft); }
+  a.card { color: inherit; }
   .card .tag {
     font-family: "JetBrains Mono", monospace;
     font-size: 0.62rem;
@@ -259,11 +260,11 @@
   .demos { margin-top: 2.8rem; display: grid; gap: 2.4rem; }
   .demo {
     display: grid;
-    grid-template-columns: 1fr 1.25fr;
+    grid-template-columns: 1fr 2.5fr;
     gap: 0 2.6rem;
     align-items: center;
   }
-  .demo:nth-child(even) { grid-template-columns: 1.25fr 1fr; }
+  .demo:nth-child(even) { grid-template-columns: 2.5fr 1fr; }
   .demo:nth-child(even) .demo-copy { order: 2; }
   .demo .tag {
     font-family: "JetBrains Mono", monospace;
@@ -310,6 +311,12 @@
       repeating-linear-gradient(45deg, #1e1e22 0 12px, #262629 12px 24px);
     color: var(--ink-2);
     width: 100vw; max-width: none;
+  }
+  /* keep the after image sized to the full .ba box (4:3), not the clipped
+     wrap, so it stays aligned with the before image while dragging */
+  .ba .after-wrap img {
+    right: auto; width: auto; max-width: none;
+    height: 100%; aspect-ratio: 4 / 3;
   }
   .ba .handle {
     position: absolute; top: 0; bottom: 0; left: 50%;
@@ -465,9 +472,8 @@
       <div class="topbar">
         <span></span>
         <nav>
-          <a href="https://github.com/" target="_blank" rel="noopener">GitHub</a>
-          <a href="https://medium.com/" target="_blank" rel="noopener">Medium</a>
-          <a href="https://linkedin.com/" target="_blank" rel="noopener">LinkedIn</a>
+          <a href="https://github.com/HasnainRaz" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://linkedin.com/in/hasnain-raza-b97ab92b0" target="_blank" rel="noopener">LinkedIn</a>
         </nav>
       </div>
 
@@ -479,9 +485,10 @@
       </div>
 
       <p class="intro">
-        Hi, I'm Hasnain. I like solving challenging problems in machine learning —
-        <b>generative models, graph neural networks, and getting them to actually work
-        in production</b>. Here are some things I've worked on:
+        Ahoy, I'm Hasnain. Welcome to my corner of the internet. I am semi distracted
+        and tinkering with multiple things at once. Currently, 3D printing a drone,
+        launching a image diffusion powered SaaS and working as a ML Engineer fulltime.
+        Here are some things I'd like to share:
       </p>
     </div>
   </header>
@@ -525,16 +532,15 @@
         <div class="demo-copy">
           <span class="tag">Real-time GAN · 2019</span>
           <h3>Fast Super-Resolution GAN</h3>
-          <p>A single-image super-resolution framework using depthwise-separable convolutions in the generator for parameter efficiency — upsamples video 4× in real time.</p>
+          <p>A single-image super-resolution framework that upsamples videos 4× in real time on a GPU. Play around with the slider.</p>
           <span class="stat">4× upscale · real-time</span>
           <!-- EDIT: add a link when you have one:
                <p style="margin-top:1rem"><a href="https://github.com/…">View code ↗</a></p> -->
         </div>
-        <!-- EDIT: swap the two .ph divs for <img> tags (see instructions above) -->
         <div class="ba" data-ba>
-          <div class="ph">BEFORE IMAGE<br>assets/superres-before.jpg</div>
+          <img src="assets/superres-before.jpg" alt="Low resolution input" />
           <div class="after-wrap">
-            <div class="ph">AFTER IMAGE<br>assets/superres-after.jpg</div>
+            <img src="assets/superres-after.jpg" alt="4× super-resolved output" />
           </div>
           <span class="ba-label before">Input</span>
           <span class="ba-label after">4× Output</span>
@@ -605,43 +611,43 @@
     <div class="posts">
 
       <!-- ── POST 1 ── -->
-      <a class="post" href="https://medium.com/" target="_blank" rel="noopener">
+      <a class="post" href="https://medium.com/hellofresh-dev/recipes-and-generative-ai-6d74a107860c" target="_blank" rel="noopener">
         <div class="thumb">
           <!-- EDIT: <img src="assets/post-1.jpg" alt="Post 1 title" /> -->
-          <div class="ph">COVER IMAGE<br>assets/post-1.jpg</div>
+          <img src="assets/post-1.webp" alt="Recipes and GenAI" />
         </div>
         <div class="body">
-          <div class="kicker"><span>Generative AI</span><span>Post title →</span></div>
-          <h3>Your first post title goes here</h3>
-          <p>A one-line summary of the post — the hook that makes someone click through.</p>
+          <div class="kicker"><span>Generative AI</span><span>Recipes and GenAI</span></div>
+          <h3>Recipes and Generative AI</h3>
+          <p>An exploration on training small language models for generating recipes aligned to search engines.</p>
           <div class="read">— min read · Medium</div>
         </div>
       </a>
 
       <!-- ── POST 2 ── -->
-      <a class="post" href="https://medium.com/" target="_blank" rel="noopener">
+      <a class="post" href="https://medium.com/hasty-ai/building-a-xmas-gan-f4d809a3d88e" target="_blank" rel="noopener">
         <div class="thumb">
           <!-- EDIT: <img src="assets/post-2.jpg" alt="Post 2 title" /> -->
-          <div class="ph">COVER IMAGE<br>assets/post-2.jpg</div>
+          <img src="assets/post-2.webp" alt="Xmas GAN" />
         </div>
         <div class="body">
-          <div class="kicker"><span>MLOps</span><span>Post title →</span></div>
-          <h3>Your second post title goes here</h3>
-          <p>A one-line summary of the post — the hook that makes someone click through.</p>
+          <div class="kicker"><span>Generative AI</span><span>Xmas GAN</span></div>
+          <h3>Building a Xmas GAN</h3>
+          <p>An experiment with CycleGANs to christmasify normal looking images</p>
           <div class="read">— min read · Medium</div>
         </div>
       </a>
 
       <!-- ── POST 3 ── -->
-      <a class="post" href="https://medium.com/" target="_blank" rel="noopener">
+      <a class="post" href="https://medium.com/hasty-ai/opening-the-black-box-of-vision-ai-algorithms-466fc3d4bf78" target="_blank" rel="noopener">
         <div class="thumb">
           <!-- EDIT: <img src="assets/post-3.jpg" alt="Post 3 title" /> -->
-          <div class="ph">COVER IMAGE<br>assets/post-3.jpg</div>
+          <img src="assets/post-3.webp" alt="Understanding CNNs" />
         </div>
         <div class="body">
-          <div class="kicker"><span>Computer Vision</span><span>Post title →</span></div>
-          <h3>Your third post title goes here</h3>
-          <p>A one-line summary of the post — the hook that makes someone click through.</p>
+          <div class="kicker"><span>Computer Vision</span><span>Understanding Convolutional Neural Networks</span></div>
+          <h3>Understanding Convolutional Neural Networks</h3>
+          <p>An illustrative and visual guide to understadning how convolutional neural networks work</p>
           <div class="read">— min read · Medium</div>
         </div>
       </a>
@@ -673,7 +679,7 @@
     <div class="head">
       <div class="label">03 — Speaking</div>
       <div>
-        <h2>Talks &amp; a podcast</h2>
+        <h2>Talks</h2>
         <p class="head-sub">Some things I've said out loud — on bringing ML research into the real world.</p>
 
         <div class="speaks">
@@ -688,7 +694,7 @@
             <div class="embed">
               <!-- EDIT: replace SHOW_OR_EPISODE_ID below -->
               <iframe class="spotify"
-                src="https://open.spotify.com/embed/show/SHOW_OR_EPISODE_ID"
+                src="https://open.spotify.com/embed/episode/3ClrpuZkVtE8IU6UYVSVYw"
                 height="152" frameborder="0" allowfullscreen
                 allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
                 loading="lazy"></iframe>
@@ -706,8 +712,8 @@
               <div class="video">
                 <!-- EDIT: replace YOUR_VIDEO_ID below -->
                 <iframe
-                  src="https://www.youtube.com/embed/YOUR_VIDEO_ID"
-                  title="Talk" frameborder="0"
+                  src="https://www.youtube.com/embed/-GVoqTPPTaM"
+                  title="Talk" frameborder="0" referrerpolicy="strict-origin-when-cross-origin"
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                   allowfullscreen loading="lazy"></iframe>
               </div>
@@ -729,28 +735,29 @@
       </div>
     </div>
     <div class="cards">
-      <div class="card">
+      <!-- EDIT: set each href to the paper / patent URL -->
+      <a class="card" href="https://openaccess.thecvf.com/content_ICCVW_2019/html/MDALC/Raza_Weakly_Supervised_One_Shot_Segmentation_ICCVW_2019_paper.html" target="_blank" rel="noopener">
         <span class="tag">Paper</span>
         <h3>Weakly Supervised One-Shot Segmentation</h3>
-        <span class="venue">ICCV Workshop · 2019</span>
-      </div>
-      <div class="card">
+        <span class="venue">ICCV Workshop · 2019 ↗</span>
+      </a>
+      <a class="card" href="https://link.springer.com/chapter/10.1007/978-3-031-26236-4_4" target="_blank" rel="noopener">
         <span class="tag">Paper</span>
         <h3>Evaluating Zero-Cost Active Learning for Object Detection</h3>
-        <span class="venue">AI4EA, Berlin · 2022</span>
-      </div>
-      <div class="card">
+        <span class="venue">AI4EA, Berlin · 2022 ↗</span>
+      </a>
+      <a class="card" href="https://patents.google.com/patent/US11816188B2/en" target="_blank" rel="noopener">
         <span class="tag">Patent</span>
         <h3>Weakly Supervised One-Shot Segmentation</h3>
-        <span class="venue">Granted</span>
-      </div>
+        <span class="venue">Granted ↗</span>
+      </a>
     </div>
   </section>
 
   <!-- ============ FOOTER CTA ============ -->
   <footer class="wrap">
     <div class="cta">
-      <h2>Want to chat?<br>Find me on <a href="https://github.com/" target="_blank" rel="noopener">GitHub</a> or <a href="https://linkedin.com/" target="_blank" rel="noopener">LinkedIn</a>.</h2>
+      <h2>Want to chat?<br>Find me on <a href="https://github.com/HasnainRaz" target="_blank" rel="noopener">GitHub</a> or <a href="https://linkedin.com/in/hasnain-raza-b97ab92b0" target="_blank" rel="noopener">LinkedIn</a>.</h2>
       <p class="fine">Berlin, Germany · always up for an interesting problem</p>
     </div>
   </footer>
