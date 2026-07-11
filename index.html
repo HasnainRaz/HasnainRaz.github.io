@@ -753,18 +753,48 @@
     var W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
     var pts = [];
     var COUNT = 0;
-    var angle = 0;
+    var angle = Math.random() * Math.PI * 2;
+    var firstLoad = true;
 
     // Lorenz parameters
     var SIGMA = 10, RHO = 28, BETA = 8 / 3, DT = 0.005;
 
+    // Per-load initial condition: pick a random point and run it onto the
+    // attractor for a random stretch, so every visitor's swarm starts at a
+    // different spot on the butterfly. The whole first generation spawns
+    // bunched within a whisker of this point — sensitive dependence on
+    // initial conditions fans it out along a different path every load.
+    var SEED = {
+      x: (Math.random() - 0.5) * 30,
+      y: (Math.random() - 0.5) * 30,
+      z: 5 + Math.random() * 40
+    };
+    for (var w = 0, wn = 100 + (Math.random() * 500 | 0); w < wn; w++) {
+      var sdx = SIGMA * (SEED.y - SEED.x);
+      var sdy = SEED.x * (RHO - SEED.z) - SEED.y;
+      var sdz = SEED.x * SEED.y - BETA * SEED.z;
+      SEED.x += sdx * DT; SEED.y += sdy * DT; SEED.z += sdz * DT;
+    }
+
     // layout: where the attractor's centre sits, and how big it is
     var cx = 0, cy = 0, scale = 1;
 
-    function spawn() {
-      // seed near the attractor's basin, then run the ODE forward a bunch of
-      // steps *invisibly* so the particle is already sitting ON the attractor
-      // before it starts drawing — avoids long streaks from far-off seeds.
+    function spawn(scatter) {
+      if (!scatter) {
+        // first generation: everyone starts almost exactly at SEED; the tiny
+        // per-particle offsets are what the chaos amplifies.
+        return {
+          x: SEED.x + (Math.random() - 0.5) * 0.02,
+          y: SEED.y + (Math.random() - 0.5) * 0.02,
+          z: SEED.z + (Math.random() - 0.5) * 0.02,
+          life: 600 + Math.random() * 900,
+          px: null, py: null
+        };
+      }
+      // respawn: seed near the attractor's basin, then run the ODE forward a
+      // bunch of steps *invisibly* so the particle is already sitting ON the
+      // attractor before it starts drawing — avoids long streaks from far-off
+      // seeds, and keeps the butterfly filled once the swarm has spread.
       var p = {
         x: (Math.random() - 0.5) * 4,
         y: (Math.random() - 0.5) * 4,
@@ -799,9 +829,13 @@
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
       COUNT = Math.max(260, Math.min(900, Math.floor(W * H / 1400)));
       pts = [];
+      // reduced-motion shows a still, and later resizes shouldn't replay the
+      // fan-out — both spawn pre-scattered over the attractor instead.
+      var scatter = reduce || !firstLoad;
+      firstLoad = false;
       for (var i = 0; i < COUNT; i++) {
-        var p = spawn();
-        p.life = Math.random() * 700; // desync lifetimes
+        var p = spawn(scatter);
+        if (scatter) p.life = Math.random() * 700; // desync lifetimes
         pts.push(p);
       }
       layout();
