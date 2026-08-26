@@ -3,11 +3,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Hasnain Raza — Machine Learning Engineer</title>
+<title>Hasnain Raza | Machine Learning Engineer</title>
 <meta name="description" content="Hasnain Raza — Staff Machine Learning Engineer in Berlin. Generative models, graph neural networks, and ML systems at scale." />
 <meta name="theme-color" content="#0a0a0b" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="preconnect" href="https://eu-assets.i.posthog.com" crossorigin />
+<link rel="preconnect" href="https://eu.i.posthog.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
 <style>
   :root {
@@ -1575,6 +1577,12 @@
         els.fill.style.width = Math.min(100, score) + "%";
         els.score.textContent = "risk " + score.toFixed(0) + " / 100";
         var blocked = score >= BLOCK_AT;
+        window.track("demo_run", {
+          demo: "prompt_injection_gauntlet",
+          blocked: blocked,
+          risk: Math.round(score),
+          chars: text.length
+        });
         els.verdict.className = "verdict " + (blocked ? "blocked" : "passed");
         els.verdict.innerHTML = '<span class="dot"></span>' + (blocked ? "Blocked" : "Passed");
         els.note.innerHTML = explain(score, all, s2);
@@ -1629,6 +1637,82 @@
     // Small enough to just fetch. Waiting for an interaction left the card
     // reading "not loaded" on a fresh page, which reads as broken.
     loadModel();
+  })();
+</script>
+<!-- ── Analytics ───────────────────────────────────────────────────────────
+     PostHog in cookieless mode: no cookies, no localStorage, no persistent
+     device ID. Visitors are counted by a salted hash PostHog computes
+     server-side and rotates daily, so there is nothing to consent to and
+     nothing to store — at the cost of the same person counting twice if they
+     come back tomorrow. Requires "Cookieless server hash mode" to be switched
+     on in Project Settings → Web analytics, or events are dropped. -->
+<script>
+  (function () {
+    // Public, write-only project key — safe to commit. Swap in the real one
+    // from Project Settings → Project API key.
+    var KEY = "phc_rFMmmzs7MHEXamDRUW3vZepdTimHevfdghvsg8cgeNYF"
+    var HOST = "https://eu.i.posthog.com";
+    var ASSETS = "https://eu-assets.i.posthog.com";
+
+    // Anything that wants to report something calls this. It stays a no-op
+    // when PostHog never loaded — placeholder key, Do Not Track, a blocker —
+    // so no caller has to guard.
+    window.track = function () {};
+
+    if (KEY.indexOf("REPLACE_WITH") !== -1) return;
+    if (navigator.doNotTrack === "1" || window.doNotTrack === "1") return;
+
+    var s = document.createElement("script");
+    s.src = ASSETS + "/static/array.js";
+    s.async = true;
+    s.onload = function () {
+      posthog.init(KEY, {
+        api_host: HOST,
+        ui_host: "https://eu.posthog.com",
+        defaults: "2026-05-30",
+
+        // No client-side storage of any kind, and no person profiles to
+        // attach it to. Pageview and pageleave come from `defaults`.
+        cookieless_mode: "always",
+        person_profiles: "never",
+
+        // Every event on this page is one written below, on purpose.
+        autocapture: false,
+        capture_heatmaps: false,
+        disable_session_recording: true,
+        disable_surveys: true,
+        respect_dnt: true
+      });
+
+      window.track = function (event, props) { posthog.capture(event, props); };
+    };
+    document.head.appendChild(s);
+
+    // ── Outbound clicks ──────────────────────────────────────────────────
+    // Delegated once at the document, so links added later are covered too.
+    // Bound immediately rather than in onload: `track` swallows anything that
+    // happens before the library lands, which is better than missing the
+    // listener entirely on a slow connection.
+    document.addEventListener("click", function (e) {
+      var a = e.target.closest && e.target.closest("a[href]");
+      if (!a) return;
+
+      var url;
+      try { url = new URL(a.href, location.href); } catch (err) { return; }
+      if (url.hostname === location.hostname) return;
+
+      // Which part of the page the link sits in — "Things I've written",
+      // "Talks", and so on. Hero links have no section heading above them.
+      var section = a.closest("section"),
+          h2 = section && section.querySelector("h2");
+
+      window.track("outbound_click", {
+        url: url.href,
+        host: url.hostname,
+        text: (a.textContent || "").trim().slice(0, 80),
+        section: h2 ? h2.textContent.trim() : "hero"
+      });
+    });
   })();
 </script>
 </body>
