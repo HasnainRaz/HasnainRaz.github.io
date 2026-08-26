@@ -87,7 +87,7 @@
   .topbar {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
+    align-items: center;
     gap: 1rem;
     margin-bottom: clamp(3rem, 12vw, 7rem);
   }
@@ -111,23 +111,30 @@
   }
   .topbar nav {
     display: flex;
-    gap: 1.4rem;
+    /* Tighter than the old text links: buttons need to read as a pair,
+       and 1.4rem left them floating apart. */
+    gap: 0.6rem;
     flex-wrap: wrap;
   }
   .topbar nav a {
-    color: var(--ink-2);
+    /* Same white-button language as .gaunt-run, so the page only has one.
+       The padding is the touch target now, so the old negative-margin trick
+       that kept it visually flush is gone. */
+    background: var(--accent);
+    color: var(--paper);
+    border: 1px solid var(--accent);
+    border-radius: 3px;
     font-family: "JetBrains Mono", monospace;
-    font-size: 0.72rem;
+    font-size: 0.78rem;
+    font-weight: 500;
     letter-spacing: 0.06em;
-    /* pad out the touch target without changing the visual layout */
-    padding: 0.7rem 0.5rem;
-    margin: -0.7rem -0.5rem;
-    transition: color 0.15s;
+    padding: 0.5rem 1rem;
+    transition: background 0.15s, color 0.15s;
   }
   .topbar nav a:hover {
+    /* Invert rather than shift white→off-white, which is invisible. */
+    background: transparent;
     color: var(--accent);
-    text-decoration: underline;
-    text-underline-offset: 4px;
   }
 
   h1.name {
@@ -619,7 +626,7 @@
 <body>
 
   <!-- ============ HERO ============ -->
-  <header class="hero">
+  <header class="hero" data-track="hero">
     <canvas id="field" aria-hidden="true"></canvas>
     <div class="hero-inner">
       <div class="topbar">
@@ -667,7 +674,7 @@
     │  Put files in an /assets folder next to index.html.                   │
     └─────────────────────────────────────────────────────────────────────┘
   -->
-  <section class="block wrap">
+  <section class="block wrap" data-track="work">
     <div class="head">
       <div class="label">01 — Projects</div>
       <div>
@@ -797,7 +804,7 @@
     │  Duplicate a whole <a class="post"> block to add more posts.          │
     └─────────────────────────────────────────────────────────────────────┘
   -->
-  <section class="block wrap">
+  <section class="block wrap" data-track="writing">
     <div class="head">
       <div class="label">02 — Writing</div>
       <div>
@@ -873,7 +880,7 @@
     │  Edit the <h3> titles and <p> descriptions to match.                  │
     └─────────────────────────────────────────────────────────────────────┘
   -->
-  <section class="block wrap">
+  <section class="block wrap" data-track="talks">
     <div class="head">
       <div class="label">03 — Speaking</div>
       <div>
@@ -924,7 +931,7 @@
   </section>
 
   <!-- ============ PUBLISHED ============ -->
-  <section class="block wrap">
+  <section class="block wrap" data-track="papers">
     <div class="head">
       <div class="label">04 — Published</div>
       <div>
@@ -953,7 +960,7 @@
   </section>
 
   <!-- ============ FOOTER CTA ============ -->
-  <footer class="wrap">
+  <footer class="wrap" data-track="contact">
     <div class="cta">
       <h2>Want to chat?<br>Find me on <a href="https://github.com/HasnainRaz" target="_blank" rel="noopener">GitHub</a> or <a href="https://linkedin.com/in/hasnain-raza-b97ab92b0" target="_blank" rel="noopener">LinkedIn</a>.</h2>
       <p class="fine">Berlin, Germany · always up for an interesting problem</p>
@@ -1650,7 +1657,7 @@
   (function () {
     // Public, write-only project key — safe to commit. Swap in the real one
     // from Project Settings → Project API key.
-    var KEY = "phc_rFMmmzs7MHEXamDRUW3vZepdTimHevfdghvsg8cgeNYF"
+    var KEY = "phc_rFMmmzs7MHEXamDRUW3vZepdTimHevfdghvsg8cgeNYF";
     var HOST = "https://eu.i.posthog.com";
     var ASSETS = "https://eu-assets.i.posthog.com";
 
@@ -1701,18 +1708,41 @@
       try { url = new URL(a.href, location.href); } catch (err) { return; }
       if (url.hostname === location.hostname) return;
 
-      // Which part of the page the link sits in — "Things I've written",
-      // "Talks", and so on. Hero links have no section heading above them.
-      var section = a.closest("section"),
-          h2 = section && section.querySelector("h2");
+      // Which region the link sits in. Read off an explicit data-track
+      // rather than the nearest <section>: the contact links live in a
+      // <footer>, which has no <section> ancestor and was silently being
+      // reported as "hero" — merging the top nav with the contact CTA.
+      var region = a.closest("[data-track]");
 
       window.track("outbound_click", {
         url: url.href,
         host: url.hostname,
         text: (a.textContent || "").trim().slice(0, 80),
-        section: h2 ? h2.textContent.trim() : "hero"
+        section: region ? region.getAttribute("data-track") : "unknown"
       });
     });
+
+    // ── Section reach ────────────────────────────────────────────────────
+    // On a single page this long, pageviews say nothing about whether anyone
+    // got past the hero. One event per region per pageload, fired when the
+    // region's top crosses 65% of the viewport — "actually reached" rather
+    // than "one pixel technically intersected". Counting these by region
+    // gives the drop-off curve straight out of a bar chart.
+    if (window.IntersectionObserver) {
+      var seen = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (!entry.isIntersecting) return;
+          seen.unobserve(entry.target);
+          window.track("section_view", {
+            section: entry.target.getAttribute("data-track")
+          });
+        });
+      }, { threshold: 0, rootMargin: "0px 0px -35% 0px" });
+
+      document.querySelectorAll("[data-track]").forEach(function (el) {
+        seen.observe(el);
+      });
+    }
   })();
 </script>
 </body>
