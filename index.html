@@ -656,6 +656,37 @@
     font-family: "JetBrains Mono", monospace; font-size: 0.6rem;
     color: var(--ink-3); letter-spacing: 0.05em;
   }
+  /* animated 2-hop path view: film -> crew -> neighbours */
+  .fg-viz { padding: 0.9rem 1.2rem 0.2rem; border-bottom: 1px solid var(--line); }
+  .fg-viz svg { width: 100%; height: auto; display: block; overflow: visible; }
+  .fg-edge {
+    fill: none; stroke: var(--line-2); stroke-width: 1;
+    stroke-dasharray: var(--len); stroke-dashoffset: var(--len);
+    transition: stroke-dashoffset 0.5s ease, stroke 0.3s;
+  }
+  .fg-edge.lit { stroke-dashoffset: 0; }
+  .fg-edge.hop2 { stroke: var(--line-2); }
+  .fg-edge.weak { stroke-dasharray: 2 3; stroke-dashoffset: 0; opacity: 0.35; }
+  .fg-node { opacity: 0; transition: opacity 0.35s ease; }
+  .fg-node.lit { opacity: 1; }
+  .fg-node circle { fill: var(--paper-2); stroke: var(--ink-3); stroke-width: 1; }
+  .fg-node.src circle { fill: var(--ink); stroke: var(--ink); }
+  .fg-node.rec circle { fill: var(--paper-2); stroke: var(--ink); }
+  .fg-node text {
+    font-family: "JetBrains Mono", monospace; font-size: 7px;
+    fill: var(--ink-2); dominant-baseline: middle;
+  }
+  .fg-node.src text { fill: var(--ink); font-size: 8px; }
+  .fg-node.rec text { fill: var(--ink); }
+  .fg-lane {
+    font-family: "JetBrains Mono", monospace; font-size: 6px;
+    fill: var(--ink-3); letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .fg-row { opacity: 0; transform: translateY(3px); transition: opacity .3s, transform .3s; }
+  .fg-row.lit { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .fg-edge, .fg-node, .fg-row { transition: none; }
+  }
 
   /* ---------- Responsive ---------- */
   @media (max-width: 52rem) {
@@ -811,8 +842,8 @@
         <div class="demo-copy">
           <span class="tag">Graph Neural Network · Runs in your browser</span>
           <h3>What Should I Watch?</h3>
-          <p>A graph neural network over 4,331 films and their crew, trained to predict who worked on what. No training labels of similarity, the graph structure is what makes the recommendations possible. Try it! pick a film and it shows its nearest neighbours, along with the actual crew connections that produced the answer.</p>
-          <span class="stat">64-dim embeddings · int8 · no server</span>
+          <p>A graph neural network over 4,331 films and their crew, trained to predict who worked on what. Nobody labelled which films are similar, that emerges from the graph. Pick a film and it shows its nearest neighbours, along with the actual crew connections that produced the answer.</p>
+          <span class="stat">64-dim embeddings</span>
         </div>
 
         <div class="fg" data-filmgraph>
@@ -824,6 +855,9 @@
             <div class="fg-chips" data-fgchips>
               <span class="ex-label">Try</span>
             </div>
+          </div>
+          <div class="fg-viz" data-fgviz hidden>
+            <svg viewBox="0 0 600 250" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
           </div>
           <div class="fg-out" data-fgout>
             <div class="fg-empty">Search for a film to see its nearest neighbours.</div>
@@ -1848,6 +1882,8 @@
       q:     root.querySelector("#fg-q"),
       sug:   root.querySelector("[data-sug]"),
       out:   root.querySelector("[data-fgout]"),
+      viz:   root.querySelector("[data-fgviz]"),
+      svg:   root.querySelector("[data-fgviz] svg"),
       foot:  root.querySelector("[data-fgfoot]"),
       chips: root.querySelector("[data-fgchips]")
     };
@@ -1964,9 +2000,121 @@
       return out;
     }
 
+    var SVGNS = "http://www.w3.org/2000/svg";
+    function el(tag, attrs) {
+      var n = document.createElementNS(SVGNS, tag);
+      for (var k in attrs) n.setAttribute(k, attrs[k]);
+      return n;
+    }
+    function clip(s, n) { return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+
+    // Draw the actual two-hop paths the recommendation came from:
+    // source film -> shared crew -> neighbour. Nothing is invented for the
+    // picture; every edge drawn is an edge that exists in the exported graph.
+    function drawGraph(srcIdx, cand, whys) {
+      var W = 600, H = 250, reduce = motionOff();
+      els.svg.innerHTML = "";
+      els.viz.hidden = false;
+
+      // crew actually used by the recommendations, most-connecting first
+      var count = new Map();
+      whys.forEach(function (w) {
+        w.slice(0, 3).forEach(function (x) {
+          count.set(x.person, (count.get(x.person) || 0) + 1);
+        });
+      });
+      var crew = Array.from(count.keys())
+        .sort(function (a, b) { return count.get(b) - count.get(a); })
+        .slice(0, 8);
+      var crewY = {}, n = Math.max(crew.length, 1);
+      crew.forEach(function (p, k) { crewY[p] = 30 + (H - 60) * (n === 1 ? 0.5 : k / (n - 1)); });
+
+      var recY = cand.map(function (_, k) {
+        return 26 + (H - 52) * (cand.length === 1 ? 0.5 : k / (cand.length - 1));
+      });
+      var X0 = 44, X1 = 300, X2 = 556, srcY = H / 2;
+
+      els.svg.appendChild(el("text", { x: X0, y: 10, class: "fg-lane", "text-anchor": "middle" })).textContent = "film";
+      els.svg.appendChild(el("text", { x: X1, y: 10, class: "fg-lane", "text-anchor": "middle" })).textContent = "shared crew";
+      els.svg.appendChild(el("text", { x: X2, y: 10, class: "fg-lane", "text-anchor": "end" })).textContent = "neighbours";
+
+      var hop1 = [], hop2 = [], nodes1 = [], nodes2 = [];
+
+      crew.forEach(function (p) {
+        var d = "M" + X0 + "," + srcY + " C" + (X0 + 110) + "," + srcY +
+                " " + (X1 - 110) + "," + crewY[p] + " " + X1 + "," + crewY[p];
+        var e = el("path", { d: d, class: "fg-edge" });
+        els.svg.appendChild(e); hop1.push(e);
+      });
+
+      cand.forEach(function (j, r) {
+        var used = whys[r].slice(0, 3).filter(function (x) { return crew.indexOf(x.person) >= 0; });
+        if (!used.length) {
+          // no shared crew: the similarity came from the wider graph, so say so
+          // with a faint direct edge rather than drawing a path that is not there
+          var d0 = "M" + X0 + "," + srcY + " C" + (X0 + 200) + "," + srcY +
+                   " " + (X2 - 200) + "," + recY[r] + " " + X2 + "," + recY[r];
+          els.svg.appendChild(el("path", { d: d0, class: "fg-edge weak" }));
+          return;
+        }
+        used.forEach(function (x) {
+          var d = "M" + X1 + "," + crewY[x.person] + " C" + (X1 + 100) + "," + crewY[x.person] +
+                  " " + (X2 - 100) + "," + recY[r] + " " + X2 + "," + recY[r];
+          var e = el("path", { d: d, class: "fg-edge hop2" });
+          els.svg.appendChild(e); hop2.push(e);
+        });
+      });
+
+      [hop1, hop2].forEach(function (set) {
+        set.forEach(function (e) {
+          var L = Math.ceil(e.getTotalLength());
+          e.style.setProperty("--len", L);
+        });
+      });
+
+      var g = el("g", { class: "fg-node src lit" });
+      g.appendChild(el("circle", { cx: X0, cy: srcY, r: 5 }));
+      var t = el("text", { x: X0, y: srcY - 12, "text-anchor": "middle" });
+      t.textContent = clip(M.d.films[srcIdx].t, 26);
+      g.appendChild(t);
+      els.svg.appendChild(g);
+
+      crew.forEach(function (p) {
+        var gg = el("g", { class: "fg-node" });
+        gg.appendChild(el("circle", { cx: X1, cy: crewY[p], r: 3.2 }));
+        var tt = el("text", { x: X1 + 8, y: crewY[p] });
+        tt.textContent = clip(M.d.people[p].t, 22);
+        gg.appendChild(tt);
+        els.svg.appendChild(gg); nodes1.push(gg);
+      });
+
+      cand.forEach(function (j, r) {
+        var gg = el("g", { class: "fg-node rec" });
+        gg.appendChild(el("circle", { cx: X2, cy: recY[r], r: 4 }));
+        var tt = el("text", { x: X2 - 9, y: recY[r], "text-anchor": "end" });
+        tt.textContent = (r + 1) + "  " + clip(M.d.films[j].t, 24);
+        gg.appendChild(tt);
+        els.svg.appendChild(gg); nodes2.push(gg);
+      });
+
+      var step = reduce ? 0 : 1;
+      var at = function (ms, fn) { setTimeout(fn, reduce ? 0 : ms); };
+      at(20,  function () { hop1.forEach(function (e) { e.classList.add("lit"); }); });
+      at(320, function () { nodes1.forEach(function (g) { g.classList.add("lit"); }); });
+      at(560, function () { hop2.forEach(function (e) { e.classList.add("lit"); }); });
+      at(900, function () { nodes2.forEach(function (g) { g.classList.add("lit"); }); });
+      return reduce ? 0 : 1000;
+    }
+
+    function motionOff() {
+      return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    }
+
+    var pickSeq = 0;
     function pick(i) {
       els.sug.hidden = true;
       els.q.value = M.d.films[i].t;
+      var mySeq = ++pickSeq;                 // a newer pick must win
 
       var dim = M.dim, base = i * dim, sims = new Float32Array(M.n);
       for (var j = 0; j < M.n; j++) {
@@ -1978,21 +2126,22 @@
 
       var cand = M.named.slice().sort(function (a, b) { return sims[b] - sims[a]; }).slice(0, 6);
       var mine = crewOf(i);
+      var whys = cand.map(function (j) { return shared(mine, crewOf(j)); });
+
+      var delay = drawGraph(i, cand, whys);
 
       els.out.innerHTML = "";
-      cand.forEach(function (j, rank) {
+      var rows = cand.map(function (j, rank) {
         var f = M.d.films[j];
         var row = document.createElement("div");
         row.className = "fg-row";
-
-        var why = shared(mine, crewOf(j));
+        var why = whys[rank];
         var whyHtml = why.length
           ? why.slice(0, 3).map(function (w) {
               return '<span class="rel">' + w.rel.replace(/_/g, " ") + ":</span> <b>" +
                      M.d.people[w.person].t + "</b>";
             }).join(" · ") + (why.length > 3 ? ' <span class="rel">+' + (why.length - 3) + " more</span>" : "")
           : '<span class="rel">no shared crew — connected through the wider graph</span>';
-
         row.innerHTML =
           '<span class="fg-rank">' + (rank + 1) + "</span>" +
           '<span class="fg-title">' + f.t +
@@ -2000,6 +2149,15 @@
           '<span class="fg-sim">' + sims[j].toFixed(3) + "</span>" +
           '<span class="fg-why">' + whyHtml + "</span>";
         els.out.appendChild(row);
+        return row;
+      });
+
+      // The list arrives as the second hop lands, so the animation reads as the
+      // cause of the ranking rather than an ornament beside it.
+      rows.forEach(function (row, k) {
+        setTimeout(function () {
+          if (mySeq === pickSeq) row.classList.add("lit");
+        }, delay ? delay + k * 60 : 0);
       });
     }
 
