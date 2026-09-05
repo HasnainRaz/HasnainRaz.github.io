@@ -2259,14 +2259,11 @@
       var sc = res.score;
       var cand = M.named.slice().sort(function (a, b) { return sc[b] - sc[a]; }).slice(0, 6);
 
-      // resolve person indices into the adjacency namespace for the "why" line
-      res.used.forEach(function (u) {
-        if (u.kind === "film") return;
-        var name = M.d.people_t[u.idx], hit = -1;
-        for (var i = 0; i < M.d.people.length; i++)
-          if (M.d.people[i].t === name) { hit = i; break; }
-        u.idx2 = hit;
-      });
+      // The deduped export unified the adjacency labels and the searchable set
+      // into one people table, so a person index is already the adjacency
+      // index. The name-matching translation this replaced existed only to
+      // bridge two index spaces that no longer differ.
+      res.used.forEach(function (u) { u.idx2 = u.kind === "film" ? -1 : u.idx; });
 
       var delay = drawGraph(res.used, cand);
       els.out.innerHTML = "";
