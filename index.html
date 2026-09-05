@@ -601,6 +601,62 @@
     color: var(--ink-3); letter-spacing: 0.05em; margin-top: 0.5rem;
   }
 
+  /* ---------- FILM GRAPH RECOMMENDER ---------- */
+  .fg { border: 1px solid var(--line); border-radius: 8px; background: var(--paper-2); overflow: hidden; }
+  .fg-in { padding: 1.1rem 1.2rem 1rem; border-bottom: 1px solid var(--line); position: relative; }
+  .fg-in input {
+    width: 100%; background: var(--paper); color: var(--ink);
+    border: 1px solid var(--line-2); border-radius: 5px; padding: 0.7rem 0.8rem;
+    font-family: "JetBrains Mono", monospace; font-size: 0.82rem;
+  }
+  .fg-in input::placeholder { color: var(--ink-3); }
+  .fg-in input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .fg-sug {
+    position: absolute; left: 1.2rem; right: 1.2rem; z-index: 6;
+    background: var(--paper); border: 1px solid var(--line-2); border-top: none;
+    border-radius: 0 0 5px 5px; max-height: 15rem; overflow-y: auto;
+  }
+  .fg-sug button {
+    display: block; width: 100%; text-align: left; background: none; border: 0;
+    color: var(--ink-2); padding: 0.45rem 0.8rem; cursor: pointer;
+    font-family: "JetBrains Mono", monospace; font-size: 0.76rem;
+  }
+  .fg-sug button:hover, .fg-sug button[aria-selected="true"] { background: var(--accent-soft); color: var(--ink); }
+  .fg-sug .yr { color: var(--ink-3); }
+  .fg-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; margin-top: 0.85rem; }
+  .fg-chips .ex-label { flex: 0 0 auto; }
+
+  .fg-out { padding: 0.4rem 0 0.2rem; min-height: 12rem; }
+  .fg-row {
+    display: grid; grid-template-columns: 1.6rem 1fr auto; gap: 0 0.7rem;
+    padding: 0.6rem 1.2rem; border-bottom: 1px solid var(--line);
+    align-items: baseline;
+  }
+  .fg-row:last-child { border-bottom: none; }
+  .fg-rank { font-family: "JetBrains Mono", monospace; font-size: 0.66rem; color: var(--ink-3); }
+  .fg-title {
+    font-family: "Space Grotesk", sans-serif; font-weight: 600;
+    font-size: 0.98rem; letter-spacing: -0.01em; color: var(--ink);
+  }
+  .fg-title .yr { color: var(--ink-3); font-weight: 400; font-size: 0.82rem; margin-left: 0.35rem; }
+  .fg-sim { font-family: "JetBrains Mono", monospace; font-size: 0.68rem; color: var(--ink-3); }
+  .fg-why {
+    grid-column: 2 / 4; margin-top: 0.25rem;
+    font-family: "JetBrains Mono", monospace; font-size: 0.64rem;
+    color: var(--ink-2); line-height: 1.6;
+  }
+  .fg-why b { color: var(--ink); font-weight: 500; }
+  .fg-why .rel { color: var(--ink-3); }
+  .fg-empty {
+    padding: 2.4rem 1.2rem; text-align: center;
+    font-family: "JetBrains Mono", monospace; font-size: 0.7rem; color: var(--ink-3);
+  }
+  .fg-foot {
+    padding: 0.8rem 1.2rem; border-top: 1px solid var(--line);
+    font-family: "JetBrains Mono", monospace; font-size: 0.6rem;
+    color: var(--ink-3); letter-spacing: 0.05em;
+  }
+
   /* ---------- Responsive ---------- */
   @media (max-width: 52rem) {
     .speaks { grid-template-columns: 1fr; }
@@ -741,6 +797,38 @@
             <div class="meter"><div class="fill" data-fill></div><div class="thresh" data-thresh></div></div>
             <div class="gaunt-timing" data-timing></div>
           </div>
+        </div>
+      </div>
+
+      <!-- ── DEMO: Film Graph Recommender ─────────────────────────────────
+           A heterogeneous GNN trained on a Wikidata film graph (4,331 films,
+           134k crew edges). Link prediction is the pretext task; the film
+           embeddings it produces are the product. The page ships those
+           embeddings as int8 and does cosine ranking in JS — no server.
+           Trained by /filmgraph; exported by filmgraph/export_web.py.
+      ──────────────────────────────────────────────────────────────────── -->
+      <div class="demo">
+        <div class="demo-copy">
+          <span class="tag">Graph Neural Network · Runs in your browser</span>
+          <h3>What Should I Watch?</h3>
+          <p>A graph neural network over 4,331 films and their crew, trained to predict who worked on what. No training labels of similarity, the graph structure is what makes the recommendations possible. Try it! pick a film and it shows its nearest neighbours, along with the actual crew connections that produced the answer.</p>
+          <span class="stat">64-dim embeddings · int8 · no server</span>
+        </div>
+
+        <div class="fg" data-filmgraph>
+          <div class="fg-in">
+            <label class="sr-only" for="fg-q">Search films</label>
+            <input id="fg-q" type="text" spellcheck="false" autocomplete="off"
+                   placeholder="Loading the graph…" disabled />
+            <div class="fg-sug" data-sug hidden></div>
+            <div class="fg-chips" data-fgchips>
+              <span class="ex-label">Try</span>
+            </div>
+          </div>
+          <div class="fg-out" data-fgout>
+            <div class="fg-empty">Search for a film to see its nearest neighbours.</div>
+          </div>
+          <div class="fg-foot" data-fgfoot></div>
         </div>
       </div>
 
@@ -1735,6 +1823,225 @@
       document.querySelectorAll("[data-track]").forEach(function (el) {
         seen.observe(el);
       });
+    }
+  })();
+</script>
+
+<script>
+  // ── FILM GRAPH RECOMMENDER ───────────────────────────────────────────────
+  // A heterogeneous GNN (SAGE + DistMult, InfoNCE) trained on a Wikidata film
+  // graph. Link prediction on crew edges is the pretext; the film embeddings
+  // are the product. Nothing here re-runs the model — the page ships 64-dim
+  // int8 embeddings and does cosine ranking plus a set intersection, which is
+  // all a "similar films, and why" demo actually needs.
+  //
+  // Trained by /filmgraph, exported by filmgraph/export_web.py.
+  (function () {
+    var root = document.querySelector("[data-filmgraph]");
+    if (!root) return;
+
+    var URL_ = "filmgraph.json";
+    var M = null;                      // decoded model
+    var loading = null;
+
+    var els = {
+      q:     root.querySelector("#fg-q"),
+      sug:   root.querySelector("[data-sug]"),
+      out:   root.querySelector("[data-fgout]"),
+      foot:  root.querySelector("[data-fgfoot]"),
+      chips: root.querySelector("[data-fgchips]")
+    };
+
+    function b64(s) {
+      var bin = atob(s), out = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+
+    function load() {
+      if (loading) return loading;
+      els.q.placeholder = "Loading the graph…";
+      loading = fetch(URL_)
+        .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(function (d) {
+          var raw = new Int8Array(b64(d.emb).buffer);
+          var n = d.n_films, dim = d.dim;
+          // Dequantise once and renormalise, so a dot product is a true cosine
+          // rather than something monotonic in one. 2000x64 floats is 512 KB
+          // resident — cheaper than doing the scaling on every query.
+          var emb = new Float32Array(n * dim);
+          for (var i = 0; i < n; i++) {
+            var s = 0, o = i * dim, v;
+            for (var k = 0; k < dim; k++) { v = raw[o + k]; s += v * v; }
+            s = Math.sqrt(s) || 1;
+            for (k = 0; k < dim; k++) emb[o + k] = raw[o + k] / s;
+          }
+          var er = b64(d.edge_rel);
+          var ed = new Uint32Array(b64(d.edge_dst).buffer);
+          var eo = new Uint32Array(b64(d.edge_off).buffer);
+
+          // Films with no English label on Wikidata show up as bare Q-ids.
+          // They are real nodes and stay in the maths; they are just no use as
+          // a search result or a recommendation a person can read.
+          var named = [];
+          for (i = 0; i < d.films.length; i++)
+            if (!/^Q\d+$/.test(d.films[i].t)) named.push(i);
+
+          M = { d: d, emb: emb, dim: dim, n: n, er: er, ed: ed, eo: eo,
+                named: named,
+                lower: d.films.map(function (f) { return f.t.toLowerCase(); }) };
+
+          els.q.disabled = false;
+          els.q.placeholder = "Search " + d.n_films.toLocaleString() + " films…";
+          var mt = d.metrics || {};
+          els.foot.textContent =
+            d.n_films.toLocaleString() + " films · " + d.n_people.toLocaleString() +
+            " people · " + d.dim + "-dim int8" +
+            (mt.mrr ? " · val MRR " + mt.mrr.toFixed(2) : "") +
+            (mt["hits@10"] ? " · hits@10 " + mt["hits@10"].toFixed(2) : "");
+          buildChips();
+          return M;
+        })
+        .catch(function (e) {
+          els.q.placeholder = location.protocol === "file:"
+            ? "needs a web server (file:// blocks fetch)"
+            : "graph unavailable";
+          return null;
+        });
+      return loading;
+    }
+
+    // ── search ─────────────────────────────────────────────────────────────
+    function search(q) {
+      q = q.trim().toLowerCase();
+      if (!q) return [];
+      var starts = [], contains = [];
+      for (var j = 0; j < M.named.length; j++) {
+        var i = M.named[j], p = M.lower[i].indexOf(q);
+        if (p === 0) starts.push(i);
+        else if (p > 0) contains.push(i);
+        if (starts.length >= 8) break;
+      }
+      // Films are already ordered most-prominent-first, so slicing keeps the
+      // best-known matches rather than an arbitrary eight.
+      return starts.concat(contains).slice(0, 8);
+    }
+
+    function renderSug(ids) {
+      if (!ids.length) { els.sug.hidden = true; return; }
+      els.sug.innerHTML = "";
+      ids.forEach(function (i) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.innerHTML = M.d.films[i].t +
+          (M.d.films[i].y ? ' <span class="yr">' + M.d.films[i].y + "</span>" : "");
+        b.addEventListener("click", function () { pick(i); });
+        els.sug.appendChild(b);
+      });
+      els.sug.hidden = false;
+    }
+
+    // ── recommend ──────────────────────────────────────────────────────────
+    var REL_ORDER = ["director", "screenwriter", "composer", "cinematographer",
+                     "film_editor", "production_designer", "costume_designer",
+                     "producer", "production_company", "distributor",
+                     "voice_actor", "cast_member"];
+
+    function crewOf(i) {
+      var m = new Map();
+      for (var e = M.eo[i]; e < M.eo[i + 1]; e++) m.set(M.ed[e], M.er[e]);
+      return m;
+    }
+
+    function shared(a, b) {
+      var out = [];
+      b.forEach(function (rel, person) {
+        if (a.has(person)) out.push({ rel: M.d.relations[rel], person: person });
+      });
+      out.sort(function (x, y) {
+        return REL_ORDER.indexOf(x.rel) - REL_ORDER.indexOf(y.rel);
+      });
+      return out;
+    }
+
+    function pick(i) {
+      els.sug.hidden = true;
+      els.q.value = M.d.films[i].t;
+
+      var dim = M.dim, base = i * dim, sims = new Float32Array(M.n);
+      for (var j = 0; j < M.n; j++) {
+        var s = 0, o = j * dim;
+        for (var k = 0; k < dim; k++) s += M.emb[base + k] * M.emb[o + k];
+        sims[j] = s;
+      }
+      sims[i] = -2;
+
+      var cand = M.named.slice().sort(function (a, b) { return sims[b] - sims[a]; }).slice(0, 6);
+      var mine = crewOf(i);
+
+      els.out.innerHTML = "";
+      cand.forEach(function (j, rank) {
+        var f = M.d.films[j];
+        var row = document.createElement("div");
+        row.className = "fg-row";
+
+        var why = shared(mine, crewOf(j));
+        var whyHtml = why.length
+          ? why.slice(0, 3).map(function (w) {
+              return '<span class="rel">' + w.rel.replace(/_/g, " ") + ":</span> <b>" +
+                     M.d.people[w.person].t + "</b>";
+            }).join(" · ") + (why.length > 3 ? ' <span class="rel">+' + (why.length - 3) + " more</span>" : "")
+          : '<span class="rel">no shared crew — connected through the wider graph</span>';
+
+        row.innerHTML =
+          '<span class="fg-rank">' + (rank + 1) + "</span>" +
+          '<span class="fg-title">' + f.t +
+            (f.y ? ' <span class="yr">' + f.y + "</span>" : "") + "</span>" +
+          '<span class="fg-sim">' + sims[j].toFixed(3) + "</span>" +
+          '<span class="fg-why">' + whyHtml + "</span>";
+        els.out.appendChild(row);
+      });
+    }
+
+    function buildChips() {
+      ["The Godfather", "The Matrix", "Spirited Away", "Parasite", "Amélie"]
+        .forEach(function (title) {
+          var i = M.lower.indexOf(title.toLowerCase());
+          if (i < 0) return;
+          var b = document.createElement("button");
+          b.type = "button"; b.className = "chip"; b.textContent = title;
+          b.addEventListener("click", function () { pick(i); });
+          els.chips.appendChild(b);
+        });
+    }
+
+    els.q.addEventListener("input", function () {
+      if (!M) return;
+      renderSug(search(els.q.value));
+    });
+    els.q.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") els.sug.hidden = true;
+      if (e.key === "Enter") {
+        var ids = search(els.q.value);
+        if (ids.length) { e.preventDefault(); pick(ids[0]); }
+      }
+    });
+    document.addEventListener("click", function (e) {
+      if (!root.contains(e.target)) els.sug.hidden = true;
+    });
+
+    // 430 KB gzipped is worth deferring until someone scrolls to it, unlike the
+    // guardrail's 86 KB which just loads on init.
+    if ("IntersectionObserver" in window) {
+      var io = new IntersectionObserver(function (entries) {
+        if (entries.some(function (x) { return x.isIntersecting; })) {
+          io.disconnect();
+          load();
+        }
+      }, { rootMargin: "400px" });
+      io.observe(root);
+    } else {
+      load();
     }
   })();
 </script>
