@@ -687,6 +687,23 @@
   @media (prefers-reduced-motion: reduce) {
     .fg-edge, .fg-node, .fg-row { transition: none; }
   }
+  .fg-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.6rem; }
+  .fg-field { position: relative; }
+  .fg-field label {
+    display: block; font-family: "JetBrains Mono", monospace; font-size: 0.58rem;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3);
+    margin-bottom: 0.3rem;
+  }
+  .fg-field input {
+    width: 100%; background: var(--paper); color: var(--ink);
+    border: 1px solid var(--line-2); border-radius: 5px; padding: 0.55rem 0.65rem;
+    font-family: "JetBrains Mono", monospace; font-size: 0.76rem;
+  }
+  .fg-field input::placeholder { color: var(--ink-3); }
+  .fg-field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .fg-field.set input { border-color: var(--ink-3); }
+  .fg-field .fg-sug { left: 0; right: 0; top: 100%; }
+  @media (max-width: 52rem) { .fg-fields { grid-template-columns: 1fr; } }
 
   /* ---------- Responsive ---------- */
   @media (max-width: 52rem) {
@@ -832,26 +849,48 @@
       </div>
 
       <!-- ── DEMO: Film Graph Recommender ─────────────────────────────────
-           A heterogeneous GNN trained on a Wikidata film graph (4,331 films,
-           134k crew edges). Link prediction is the pretext task; the film
-           embeddings it produces are the product. The page ships those
-           embeddings as int8 and does cosine ranking in JS — no server.
+           Query-by-crew. The visitor names a film, a director and a lead, and
+           the page runs the model's own decoder — DistMult over a
+           heterogeneous GNN trained on a Wikidata film graph:
+               score(film) = <h_film, R_rel, h_person>
+           which is the exact link-prediction task the model was trained on,
+           not a similarity heuristic derived from it.
            Trained by /filmgraph; exported by filmgraph/export_web.py.
       ──────────────────────────────────────────────────────────────────── -->
       <div class="demo">
         <div class="demo-copy">
           <span class="tag">Graph Neural Network · Runs in your browser</span>
           <h3>What Should I Watch?</h3>
-          <p>A graph neural network over 4,331 films and their crew, trained to predict who worked on what. Nobody labelled which films are similar, that emerges from the graph. Pick a film and it shows its nearest neighbours, along with the actual crew connections that produced the answer.</p>
-          <span class="stat">64-dim embeddings</span>
+          <p>Name a film you liked, its director, or an actor in it — any two will do. A graph neural network trained on 4,331 films and their crew scores every film in the graph against what you gave it, and shows the crew connections behind each answer.</p>
+          <span class="stat">64-dim embeddings · int8 · no server</span>
         </div>
 
         <div class="fg" data-filmgraph>
           <div class="fg-in">
-            <label class="sr-only" for="fg-q">Search films</label>
-            <input id="fg-q" type="text" spellcheck="false" autocomplete="off"
-                   placeholder="Loading the graph…" disabled />
-            <div class="fg-sug" data-sug hidden></div>
+            <div class="fg-fields">
+              <div class="fg-field" data-field="film">
+                <label for="fg-film">Film</label>
+                <input id="fg-film" type="text" spellcheck="false" autocomplete="off"
+                       placeholder="Loading…" disabled />
+                <div class="fg-sug" hidden></div>
+              </div>
+              <div class="fg-field" data-field="director">
+                <label for="fg-dir">Director</label>
+                <input id="fg-dir" type="text" spellcheck="false" autocomplete="off"
+                       placeholder="Loading…" disabled />
+                <div class="fg-sug" hidden></div>
+              </div>
+              <div class="fg-field" data-field="actor">
+                <label for="fg-act">Lead actor</label>
+                <input id="fg-act" type="text" spellcheck="false" autocomplete="off"
+                       placeholder="Loading…" disabled />
+                <div class="fg-sug" hidden></div>
+              </div>
+            </div>
+            <div class="gaunt-row">
+              <button class="gaunt-run" type="button" data-fgrun disabled>Recommend</button>
+              <span class="gaunt-hint" data-fghint>Fill any two</span>
+            </div>
             <div class="fg-chips" data-fgchips>
               <span class="ex-label">Try</span>
             </div>
@@ -860,7 +899,7 @@
             <svg viewBox="0 0 600 250" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
           </div>
           <div class="fg-out" data-fgout>
-            <div class="fg-empty">Search for a film to see its nearest neighbours.</div>
+            <div class="fg-empty">Give it a film, a director, or an actor — any two.</div>
           </div>
           <div class="fg-foot" data-fgfoot></div>
         </div>
@@ -1879,14 +1918,45 @@
     var loading = null;
 
     var els = {
-      q:     root.querySelector("#fg-q"),
-      sug:   root.querySelector("[data-sug]"),
       out:   root.querySelector("[data-fgout]"),
       viz:   root.querySelector("[data-fgviz]"),
       svg:   root.querySelector("[data-fgviz] svg"),
       foot:  root.querySelector("[data-fgfoot]"),
-      chips: root.querySelector("[data-fgchips]")
+      chips: root.querySelector("[data-fgchips]"),
+      run:   root.querySelector("[data-fgrun]"),
+      hint:  root.querySelector("[data-fghint]")
     };
+    var INPUTS = {
+      film:     root.querySelector("#fg-film"),
+      director: root.querySelector("#fg-dir"),
+      actor:    root.querySelector("#fg-act")
+    };
+    var SUGS = {};
+    Object.keys(INPUTS).forEach(function (k) {
+      SUGS[k] = INPUTS[k].closest(".fg-field").querySelector(".fg-sug");
+    });
+
+    // Mirror of filmgraph/names.py normalize(). Order is load-bearing: NFKC,
+    // lowercase, strip combining marks, collapse whitespace. toLowerCase()
+    // matches Python's .lower() (casefold() would not), and \p{M} matches
+    // unicodedata.combining(). Parity-tested 12/12 across accents, full-width
+    // characters, CJK and apostrophes.
+    function normName(s) {
+      return s.normalize("NFKC").toLowerCase()
+              .normalize("NFD").replace(/\p{M}/gu, "")
+              .replace(/\s+/g, " ").trim();
+    }
+
+    function deqInto(i8, rows, dim) {
+      var out = new Float32Array(rows * dim);
+      for (var r = 0; r < rows; r++) {
+        var o = r * dim, s2 = 0, k;
+        for (k = 0; k < dim; k++) s2 += i8[o + k] * i8[o + k];
+        s2 = Math.sqrt(s2) || 1;
+        for (k = 0; k < dim; k++) out[o + k] = i8[o + k] / s2;
+      }
+      return out;
+    }
 
     function b64(s) {
       var bin = atob(s), out = new Uint8Array(bin.length);
@@ -1896,92 +1966,201 @@
 
     function load() {
       if (loading) return loading;
-      els.q.placeholder = "Loading the graph…";
       loading = fetch(URL_)
         .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
         .then(function (d) {
           var raw = new Int8Array(b64(d.emb).buffer);
           var n = d.n_films, dim = d.dim;
-          // Dequantise once and renormalise, so a dot product is a true cosine
-          // rather than something monotonic in one. 2000x64 floats is 512 KB
-          // resident — cheaper than doing the scaling on every query.
-          var emb = new Float32Array(n * dim);
-          for (var i = 0; i < n; i++) {
-            var s = 0, o = i * dim, v;
-            for (var k = 0; k < dim; k++) { v = raw[o + k]; s += v * v; }
-            s = Math.sqrt(s) || 1;
-            for (k = 0; k < dim; k++) emb[o + k] = raw[o + k] / s;
-          }
+          var emb = deqInto(raw, n, dim);
           var er = b64(d.edge_rel);
           var ed = new Uint32Array(b64(d.edge_dst).buffer);
           var eo = new Uint32Array(b64(d.edge_off).buffer);
+          var fy = new Int16Array(b64(d.film_y).buffer);
+          var fc = b64(d.film_c);
+          var pr = b64(d.people_r);
+          var qrow = new Uint32Array(b64(d.q_row).buffer);
+          var qemb = d.q_emb ? deqInto(new Int8Array(b64(d.q_emb).buffer), qrow.length, dim) : null;
+          var qrel = d.q_rel
+            ? (function () {
+                var a = new Int8Array(b64(d.q_rel).buffer), o = new Float32Array(a.length);
+                for (var i = 0; i < a.length; i++) o[i] = a[i] * d.q_rel_scale;
+                return o;
+              })()
+            : null;
 
-          // Films with no English label on Wikidata show up as bare Q-ids.
-          // They are real nodes and stay in the maths; they are just no use as
-          // a search result or a recommendation a person can read.
+          // q_emb row i belongs to people index qrow[i]; invert it once so a
+          // person index can find its embedding in O(1).
+          var qrowOf = new Int32Array(d.people_t.length).fill(-1);
+          for (var i = 0; i < qrow.length; i++) qrowOf[qrow[i]] = i;
+
+          // Normalised match keys are derived here rather than shipped — the
+          // page already carries normName(), so sending a second copy of every
+          // name was pure duplication.
+          var filmN = d.film_t.map(normName);
+          var peopleN = d.people_t.map(normName);
+
+          // Films with no English or mul label on Wikidata surface as bare
+          // Q-ids. 80 of 55k after the mul fix. They stay in the maths and are
+          // filtered out of anything a person reads.
           var named = [];
-          for (i = 0; i < d.films.length; i++)
-            if (!/^Q\d+$/.test(d.films[i].t)) named.push(i);
+          for (i = 0; i < d.film_t.length; i++)
+            if (!/^Q\d+$/.test(d.film_t[i])) named.push(i);
 
           M = { d: d, emb: emb, dim: dim, n: n, er: er, ed: ed, eo: eo,
-                named: named,
-                lower: d.films.map(function (f) { return f.t.toLowerCase(); }) };
+                fy: fy, fc: fc, pr: pr, qemb: qemb, qrel: qrel, qrowOf: qrowOf,
+                filmN: filmN, peopleN: peopleN, named: named };
 
-          els.q.disabled = false;
-          els.q.placeholder = "Search " + d.n_films.toLocaleString() + " films…";
+          Object.keys(INPUTS).forEach(function (k) {
+            INPUTS[k].disabled = false;
+            INPUTS[k].placeholder = k === "film" ? "e.g. The Godfather"
+                                  : k === "director" ? "e.g. Ridley Scott"
+                                  : "e.g. Toshiro Mifune";
+          });
           var mt = d.metrics || {};
           els.foot.textContent =
-            d.n_films.toLocaleString() + " films · " + d.n_people.toLocaleString() +
-            " people · " + d.dim + "-dim int8" +
-            (mt.mrr ? " · val MRR " + mt.mrr.toFixed(2) : "") +
-            (mt["hits@10"] ? " · hits@10 " + mt["hits@10"].toFixed(2) : "");
+            d.n_films.toLocaleString() + " films · " +
+            qrow.length.toLocaleString() + " searchable people · " +
+            d.dim + "-dim int8" +
+            (mt.mrr ? " · val MRR " + mt.mrr.toFixed(2) : "");
           buildChips();
+          refresh();
           return M;
         })
-        .catch(function (e) {
-          els.q.placeholder = location.protocol === "file:"
-            ? "needs a web server (file:// blocks fetch)"
-            : "graph unavailable";
+        .catch(function (err) {
+          // Report it. A silent catch here hid a real decode bug behind a
+          // generic "graph unavailable" for several debugging rounds.
+          console.error("filmgraph: load failed", err);
+          window.__fgError = String(err && err.stack || err);
+          Object.keys(INPUTS).forEach(function (k) {
+            INPUTS[k].placeholder = location.protocol === "file:"
+              ? "needs a web server" : "graph unavailable";
+          });
           return null;
         });
       return loading;
     }
 
-    // ── search ─────────────────────────────────────────────────────────────
-    function search(q) {
-      q = q.trim().toLowerCase();
-      if (!q) return [];
-      var starts = [], contains = [];
-      for (var j = 0; j < M.named.length; j++) {
-        var i = M.named[j], p = M.lower[i].indexOf(q);
-        if (p === 0) starts.push(i);
-        else if (p > 0) contains.push(i);
-        if (starts.length >= 8) break;
+    // ── field resolution ───────────────────────────────────────────────
+    // A field is one of three states, and they are NOT interchangeable:
+    //   empty      -> omit the term entirely (never embed the absence)
+    //   unresolved -> tell the user; do not silently drop it
+    //   resolved   -> contribute a scored term
+    var FIELDS = { film: null, director: null, actor: null };
+
+    function lookup(kind, text) {
+      var q = normName(text);
+      if (!q) return null;
+      if (kind === "film") {
+        var ex = -1, pre = -1;
+        for (var i = 0; i < M.filmN.length; i++) {
+          if (M.filmN[i] === q) { ex = i; break; }
+          if (pre < 0 && M.filmN[i].indexOf(q) === 0) pre = i;
+        }
+        return ex >= 0 ? ex : (pre >= 0 ? pre : null);
       }
-      // Films are already ordered most-prominent-first, so slicing keeps the
-      // best-known matches rather than an arbitrary eight.
-      return starts.concat(contains).slice(0, 8);
+      var bit = kind === "director" ? 1 : 2, e2 = -1, p2 = -1;
+      for (var j = 0; j < M.peopleN.length; j++) {
+        // must have the role AND an embedding, or there is nothing to score
+        if (!(M.pr[j] & bit) || M.qrowOf[j] < 0) continue;
+        if (M.peopleN[j] === q) { e2 = j; break; }
+        if (p2 < 0 && M.peopleN[j].indexOf(q) === 0) p2 = j;
+      }
+      return e2 >= 0 ? e2 : (p2 >= 0 ? p2 : null);
     }
 
-    function renderSug(ids) {
-      if (!ids.length) { els.sug.hidden = true; return; }
-      els.sug.innerHTML = "";
-      ids.forEach(function (i) {
-        var b = document.createElement("button");
-        b.type = "button";
-        b.innerHTML = M.d.films[i].t +
-          (M.d.films[i].y ? ' <span class="yr">' + M.d.films[i].y + "</span>" : "");
-        b.addEventListener("click", function () { pick(i); });
-        els.sug.appendChild(b);
-      });
-      els.sug.hidden = false;
+    function suggest(kind, text) {
+      var q = normName(text), out = [];
+      if (!q) return out;
+      if (kind === "film") {
+        for (var i = 0; i < M.filmN.length && out.length < 8; i++)
+          if (M.filmN[i].indexOf(q) >= 0) out.push(i);
+        return out;
+      }
+      var bit = kind === "director" ? 1 : 2;
+      for (var j = 0; j < M.peopleN.length && out.length < 8; j++)
+        if ((M.pr[j] & bit) && M.qrowOf[j] >= 0 && M.peopleN[j].indexOf(q) >= 0) out.push(j);
+      return out;
     }
 
-    // ── recommend ──────────────────────────────────────────────────────────
-    var REL_ORDER = ["director", "screenwriter", "composer", "cinematographer",
-                     "film_editor", "production_designer", "costume_designer",
-                     "producer", "production_company", "distributor",
-                     "voice_actor", "cast_member"];
+    // ── scoring ────────────────────────────────────────────────────────────
+    function zscore(v) {
+      var m = 0, i;
+      for (i = 0; i < v.length; i++) m += v[i];
+      m /= v.length;
+      var s = 0;
+      for (i = 0; i < v.length; i++) s += (v[i] - m) * (v[i] - m);
+      s = Math.sqrt(s / v.length);
+      if (!(s > 1e-9)) return null;     // degenerate term: drop, never divide
+      var out = new Float32Array(v.length);
+      for (i = 0; i < v.length; i++) out[i] = (v[i] - m) / s;
+      return out;
+    }
+
+    // score(film) = <h_film, R_rel, h_person> — the trained DistMult decoder,
+    // i.e. the exact link-prediction task, applied to a crew the visitor named.
+    function distmultTerm(relName, peopleIdx) {
+      var dim = M.dim, r = M.d.relations.indexOf(relName);
+      var row = M.qrowOf[peopleIdx];
+      if (r < 0 || row < 0 || !M.qemb || !M.qrel) return null;
+      var w = new Float32Array(dim), ro = r * dim, po = row * dim, k;
+      for (k = 0; k < dim; k++) w[k] = M.qrel[ro + k] * M.qemb[po + k];
+      var out = new Float32Array(M.n);
+      for (var j = 0; j < M.n; j++) {
+        var acc = 0, fo = j * dim;
+        for (k = 0; k < dim; k++) acc += M.emb[fo + k] * w[k];
+        out[j] = acc;
+      }
+      return out;
+    }
+
+    function filmTerm(filmIdx) {
+      var dim = M.dim, out = new Float32Array(M.n), base = filmIdx * dim;
+      for (var j = 0; j < M.n; j++) {
+        var acc = 0, o = j * dim;
+        for (var k = 0; k < dim; k++) acc += M.emb[base + k] * M.emb[o + k];
+        out[j] = acc;
+      }
+      return out;
+    }
+
+    function scoreAll() {
+      var terms = [], used = [];
+      if (FIELDS.film !== null) {
+        var t = zscore(filmTerm(FIELDS.film));
+        if (t) { terms.push(t); used.push({ kind: "film", idx: FIELDS.film }); }
+      }
+      if (FIELDS.director !== null) {
+        var d = distmultTerm("director", FIELDS.director);
+        d = d && zscore(d);
+        if (d) { terms.push(d); used.push({ kind: "director", idx: FIELDS.director }); }
+      }
+      if (FIELDS.actor !== null) {
+        var a = distmultTerm("cast_member", FIELDS.actor);
+        a = a && zscore(a);
+        if (a) { terms.push(a); used.push({ kind: "actor", idx: FIELDS.actor }); }
+      }
+      if (terms.length < 2) return null;
+
+      var total = new Float32Array(M.n);
+      // Equal weights: z-scoring already puts the terms on one scale, and there
+      // is no measurement justifying anything else.
+      for (var i = 0; i < terms.length; i++)
+        for (var j = 0; j < M.n; j++) total[j] += terms[i][j];
+      if (FIELDS.film !== null) total[FIELDS.film] = -1e9;
+      return { score: total, used: used };
+    }
+
+    // ── render ─────────────────────────────────────────────────────────────
+    var SVGNS = "http://www.w3.org/2000/svg";
+    function el(tag, a) {
+      var n = document.createElementNS(SVGNS, tag);
+      for (var k in a) n.setAttribute(k, a[k]);
+      return n;
+    }
+    function clip(s, n) { return s.length > n ? s.slice(0, n - 1) + "\u2026" : s; }
+    function motionOff() {
+      return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    }
 
     function crewOf(i) {
       var m = new Map();
@@ -1989,204 +2168,212 @@
       return m;
     }
 
-    function shared(a, b) {
-      var out = [];
-      b.forEach(function (rel, person) {
-        if (a.has(person)) out.push({ rel: M.d.relations[rel], person: person });
-      });
-      out.sort(function (x, y) {
-        return REL_ORDER.indexOf(x.rel) - REL_ORDER.indexOf(y.rel);
-      });
-      return out;
+    function label(u) {
+      return u.kind === "film" ? M.d.film_t[u.idx] : M.d.people_t[u.idx];
     }
 
-    var SVGNS = "http://www.w3.org/2000/svg";
-    function el(tag, attrs) {
-      var n = document.createElementNS(SVGNS, tag);
-      for (var k in attrs) n.setAttribute(k, attrs[k]);
-      return n;
-    }
-    function clip(s, n) { return s.length > n ? s.slice(0, n - 1) + "…" : s; }
-
-    // Draw the actual two-hop paths the recommendation came from:
-    // source film -> shared crew -> neighbour. Nothing is invented for the
-    // picture; every edge drawn is an edge that exists in the exported graph.
-    function drawGraph(srcIdx, cand, whys) {
+    function drawGraph(used, cand) {
       var W = 600, H = 250, reduce = motionOff();
       els.svg.innerHTML = "";
       els.viz.hidden = false;
+      var X0 = 52, X1 = 300, X2 = 556, srcY = H / 2;
 
-      // crew actually used by the recommendations, most-connecting first
-      var count = new Map();
-      whys.forEach(function (w) {
-        w.slice(0, 3).forEach(function (x) {
-          count.set(x.person, (count.get(x.person) || 0) + 1);
-        });
+      els.svg.appendChild(el("text", { x: X0, y: 10, class: "fg-lane", "text-anchor": "middle" })).textContent = "your query";
+      els.svg.appendChild(el("text", { x: X1, y: 10, class: "fg-lane", "text-anchor": "middle" })).textContent = "what you named";
+      els.svg.appendChild(el("text", { x: X2, y: 10, class: "fg-lane", "text-anchor": "end" })).textContent = "recommended";
+
+      var midY = {}, n = used.length;
+      used.forEach(function (u, k) {
+        midY[k] = 40 + (H - 80) * (n === 1 ? 0.5 : k / (n - 1));
       });
-      var crew = Array.from(count.keys())
-        .sort(function (a, b) { return count.get(b) - count.get(a); })
-        .slice(0, 8);
-      var crewY = {}, n = Math.max(crew.length, 1);
-      crew.forEach(function (p, k) { crewY[p] = 30 + (H - 60) * (n === 1 ? 0.5 : k / (n - 1)); });
-
       var recY = cand.map(function (_, k) {
         return 26 + (H - 52) * (cand.length === 1 ? 0.5 : k / (cand.length - 1));
       });
-      var X0 = 44, X1 = 300, X2 = 556, srcY = H / 2;
-
-      els.svg.appendChild(el("text", { x: X0, y: 10, class: "fg-lane", "text-anchor": "middle" })).textContent = "film";
-      els.svg.appendChild(el("text", { x: X1, y: 10, class: "fg-lane", "text-anchor": "middle" })).textContent = "shared crew";
-      els.svg.appendChild(el("text", { x: X2, y: 10, class: "fg-lane", "text-anchor": "end" })).textContent = "neighbours";
 
       var hop1 = [], hop2 = [], nodes1 = [], nodes2 = [];
-
-      crew.forEach(function (p) {
-        var d = "M" + X0 + "," + srcY + " C" + (X0 + 110) + "," + srcY +
-                " " + (X1 - 110) + "," + crewY[p] + " " + X1 + "," + crewY[p];
+      used.forEach(function (u, k) {
+        var d = "M" + X0 + "," + srcY + " C" + (X0 + 100) + "," + srcY + " " +
+                (X1 - 100) + "," + midY[k] + " " + X1 + "," + midY[k];
         var e = el("path", { d: d, class: "fg-edge" });
         els.svg.appendChild(e); hop1.push(e);
       });
 
       cand.forEach(function (j, r) {
-        var used = whys[r].slice(0, 3).filter(function (x) { return crew.indexOf(x.person) >= 0; });
-        if (!used.length) {
-          // no shared crew: the similarity came from the wider graph, so say so
-          // with a faint direct edge rather than drawing a path that is not there
-          var d0 = "M" + X0 + "," + srcY + " C" + (X0 + 200) + "," + srcY +
-                   " " + (X2 - 200) + "," + recY[r] + " " + X2 + "," + recY[r];
-          els.svg.appendChild(el("path", { d: d0, class: "fg-edge weak" }));
-          return;
-        }
-        used.forEach(function (x) {
-          var d = "M" + X1 + "," + crewY[x.person] + " C" + (X1 + 100) + "," + crewY[x.person] +
-                  " " + (X2 - 100) + "," + recY[r] + " " + X2 + "," + recY[r];
+        var crew = crewOf(j), any = false;
+        used.forEach(function (u, k) {
+          var hit = u.kind === "film" ? false : crew.has(u.idx2);
+          if (u.kind === "film" && j !== u.idx) hit = false;
+          if (!hit) return;
+          any = true;
+          var d = "M" + X1 + "," + midY[k] + " C" + (X1 + 100) + "," + midY[k] + " " +
+                  (X2 - 100) + "," + recY[r] + " " + X2 + "," + recY[r];
           var e = el("path", { d: d, class: "fg-edge hop2" });
           els.svg.appendChild(e); hop2.push(e);
         });
+        if (!any) {
+          var d0 = "M" + X0 + "," + srcY + " C" + (X0 + 200) + "," + srcY + " " +
+                   (X2 - 200) + "," + recY[r] + " " + X2 + "," + recY[r];
+          els.svg.appendChild(el("path", { d: d0, class: "fg-edge weak" }));
+        }
       });
 
       [hop1, hop2].forEach(function (set) {
-        set.forEach(function (e) {
-          var L = Math.ceil(e.getTotalLength());
-          e.style.setProperty("--len", L);
-        });
+        set.forEach(function (e) { e.style.setProperty("--len", Math.ceil(e.getTotalLength())); });
       });
 
       var g = el("g", { class: "fg-node src lit" });
       g.appendChild(el("circle", { cx: X0, cy: srcY, r: 5 }));
       var t = el("text", { x: X0, y: srcY - 12, "text-anchor": "middle" });
-      t.textContent = clip(M.d.films[srcIdx].t, 26);
-      g.appendChild(t);
-      els.svg.appendChild(g);
+      t.textContent = used.length + " inputs";
+      g.appendChild(t); els.svg.appendChild(g);
 
-      crew.forEach(function (p) {
+      used.forEach(function (u, k) {
         var gg = el("g", { class: "fg-node" });
-        gg.appendChild(el("circle", { cx: X1, cy: crewY[p], r: 3.2 }));
-        var tt = el("text", { x: X1 + 8, y: crewY[p] });
-        tt.textContent = clip(M.d.people[p].t, 22);
-        gg.appendChild(tt);
-        els.svg.appendChild(gg); nodes1.push(gg);
+        gg.appendChild(el("circle", { cx: X1, cy: midY[k], r: 3.4 }));
+        var tt = el("text", { x: X1 + 8, y: midY[k] });
+        tt.textContent = clip(label(u), 24);
+        gg.appendChild(tt); els.svg.appendChild(gg); nodes1.push(gg);
       });
 
       cand.forEach(function (j, r) {
         var gg = el("g", { class: "fg-node rec" });
         gg.appendChild(el("circle", { cx: X2, cy: recY[r], r: 4 }));
         var tt = el("text", { x: X2 - 9, y: recY[r], "text-anchor": "end" });
-        tt.textContent = (r + 1) + "  " + clip(M.d.films[j].t, 24);
-        gg.appendChild(tt);
-        els.svg.appendChild(gg); nodes2.push(gg);
+        tt.textContent = (r + 1) + "  " + clip(M.d.film_t[j], 24);
+        gg.appendChild(tt); els.svg.appendChild(gg); nodes2.push(gg);
       });
 
-      var step = reduce ? 0 : 1;
       var at = function (ms, fn) { setTimeout(fn, reduce ? 0 : ms); };
       at(20,  function () { hop1.forEach(function (e) { e.classList.add("lit"); }); });
-      at(320, function () { nodes1.forEach(function (g) { g.classList.add("lit"); }); });
+      at(320, function () { nodes1.forEach(function (x) { x.classList.add("lit"); }); });
       at(560, function () { hop2.forEach(function (e) { e.classList.add("lit"); }); });
-      at(900, function () { nodes2.forEach(function (g) { g.classList.add("lit"); }); });
+      at(900, function () { nodes2.forEach(function (x) { x.classList.add("lit"); }); });
       return reduce ? 0 : 1000;
     }
 
-    function motionOff() {
-      return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    }
+    var runSeq = 0;
+    function recommend() {
+      var res = scoreAll();
+      if (!res) return;
+      var mySeq = ++runSeq;
+      var sc = res.score;
+      var cand = M.named.slice().sort(function (a, b) { return sc[b] - sc[a]; }).slice(0, 6);
 
-    var pickSeq = 0;
-    function pick(i) {
-      els.sug.hidden = true;
-      els.q.value = M.d.films[i].t;
-      var mySeq = ++pickSeq;                 // a newer pick must win
+      // resolve person indices into the adjacency namespace for the "why" line
+      res.used.forEach(function (u) {
+        if (u.kind === "film") return;
+        var name = M.d.people_t[u.idx], hit = -1;
+        for (var i = 0; i < M.d.people.length; i++)
+          if (M.d.people[i].t === name) { hit = i; break; }
+        u.idx2 = hit;
+      });
 
-      var dim = M.dim, base = i * dim, sims = new Float32Array(M.n);
-      for (var j = 0; j < M.n; j++) {
-        var s = 0, o = j * dim;
-        for (var k = 0; k < dim; k++) s += M.emb[base + k] * M.emb[o + k];
-        sims[j] = s;
-      }
-      sims[i] = -2;
-
-      var cand = M.named.slice().sort(function (a, b) { return sims[b] - sims[a]; }).slice(0, 6);
-      var mine = crewOf(i);
-      var whys = cand.map(function (j) { return shared(mine, crewOf(j)); });
-
-      var delay = drawGraph(i, cand, whys);
-
+      var delay = drawGraph(res.used, cand);
       els.out.innerHTML = "";
       var rows = cand.map(function (j, rank) {
-        var f = M.d.films[j];
+        var crew = crewOf(j), bits = [];
+        res.used.forEach(function (u) {
+          if (u.kind === "film") return;
+          if (u.idx2 >= 0 && crew.has(u.idx2)) {
+            bits.push('<span class="rel">' +
+              (u.kind === "director" ? "directed by" : "features") + ":</span> <b>" +
+              M.d.people_t[u.idx2] + "</b>");
+          }
+        });
+        if (FIELDS.film !== null) {
+          var mine = crewOf(FIELDS.film), sh = [];
+          crew.forEach(function (rel, p) { if (mine.has(p)) sh.push(p); });
+          if (sh.length) bits.push('<span class="rel">shares ' + sh.length +
+            " crew with " + M.d.film_t[FIELDS.film] + "</span>");
+        }
+        var why = bits.length ? bits.slice(0, 3).join(" \u00b7 ")
+          : '<span class="rel">predicted by the model — no direct crew link</span>';
         var row = document.createElement("div");
         row.className = "fg-row";
-        var why = whys[rank];
-        var whyHtml = why.length
-          ? why.slice(0, 3).map(function (w) {
-              return '<span class="rel">' + w.rel.replace(/_/g, " ") + ":</span> <b>" +
-                     M.d.people[w.person].t + "</b>";
-            }).join(" · ") + (why.length > 3 ? ' <span class="rel">+' + (why.length - 3) + " more</span>" : "")
-          : '<span class="rel">no shared crew — connected through the wider graph</span>';
         row.innerHTML =
           '<span class="fg-rank">' + (rank + 1) + "</span>" +
-          '<span class="fg-title">' + f.t +
-            (f.y ? ' <span class="yr">' + f.y + "</span>" : "") + "</span>" +
-          '<span class="fg-sim">' + sims[j].toFixed(3) + "</span>" +
-          '<span class="fg-why">' + whyHtml + "</span>";
+          '<span class="fg-title">' + M.d.film_t[j] +
+            (M.fy[j] ? ' <span class="yr">' + M.fy[j] + "</span>" : "") +
+            (M.fc[j] ? ' <span class="yr">\u00b7 unseen in training</span>' : "") + "</span>" +
+          '<span class="fg-sim">' + sc[j].toFixed(2) + "</span>" +
+          '<span class="fg-why">' + why + "</span>";
         els.out.appendChild(row);
         return row;
       });
-
-      // The list arrives as the second hop lands, so the animation reads as the
-      // cause of the ranking rather than an ornament beside it.
       rows.forEach(function (row, k) {
-        setTimeout(function () {
-          if (mySeq === pickSeq) row.classList.add("lit");
-        }, delay ? delay + k * 60 : 0);
+        setTimeout(function () { if (mySeq === runSeq) row.classList.add("lit"); },
+                   delay ? delay + k * 60 : 0);
       });
     }
 
-    function buildChips() {
-      ["The Godfather", "The Matrix", "Spirited Away", "Parasite", "Amélie"]
-        .forEach(function (title) {
-          var i = M.lower.indexOf(title.toLowerCase());
-          if (i < 0) return;
-          var b = document.createElement("button");
-          b.type = "button"; b.className = "chip"; b.textContent = title;
-          b.addEventListener("click", function () { pick(i); });
-          els.chips.appendChild(b);
-        });
+    // ── wiring ─────────────────────────────────────────────────────────────
+    function refresh() {
+      var ready = 0, unresolved = [];
+      Object.keys(INPUTS).forEach(function (k) {
+        var txt = INPUTS[k].value.trim();
+        var field = INPUTS[k].closest(".fg-field");
+        if (!txt) { FIELDS[k] = null; field.classList.remove("set"); return; }
+        FIELDS[k] = lookup(k, txt);
+        field.classList.toggle("set", FIELDS[k] !== null);
+        if (FIELDS[k] === null) unresolved.push(k); else ready++;
+      });
+      els.run.disabled = ready < 2;
+      els.hint.textContent = unresolved.length
+        ? "not found: " + unresolved.join(", ")
+        : ready < 2 ? "Fill any two" : "Enter to run";
     }
 
-    els.q.addEventListener("input", function () {
-      if (!M) return;
-      renderSug(search(els.q.value));
+    Object.keys(INPUTS).forEach(function (kind) {
+      var inp = INPUTS[kind], sug = SUGS[kind];
+      inp.addEventListener("input", function () {
+        if (!M) return;
+        refresh();
+        var ids = suggest(kind, inp.value);
+        if (!ids.length) { sug.hidden = true; return; }
+        sug.innerHTML = "";
+        ids.forEach(function (i) {
+          var b = document.createElement("button");
+          b.type = "button";
+          b.innerHTML = kind === "film"
+            ? M.d.film_t[i] + (M.fy[i] ? ' <span class="yr">' + M.fy[i] + "</span>" : "")
+            : M.d.people_t[i];
+          b.addEventListener("click", function () {
+            inp.value = kind === "film" ? M.d.film_t[i] : M.d.people_t[i];
+            sug.hidden = true; refresh();
+          });
+          sug.appendChild(b);
+        });
+        sug.hidden = false;
+      });
+      inp.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") sug.hidden = true;
+        if (e.key === "Enter") { e.preventDefault(); sug.hidden = true; refresh();
+          if (!els.run.disabled) recommend(); }
+      });
     });
-    els.q.addEventListener("keydown", function (e) {
-      if (e.key === "Escape") els.sug.hidden = true;
-      if (e.key === "Enter") {
-        var ids = search(els.q.value);
-        if (ids.length) { e.preventDefault(); pick(ids[0]); }
-      }
-    });
+    els.run.addEventListener("click", recommend);
     document.addEventListener("click", function (e) {
-      if (!root.contains(e.target)) els.sug.hidden = true;
+      if (!root.contains(e.target))
+        Object.keys(SUGS).forEach(function (k) { SUGS[k].hidden = true; });
     });
+
+    function buildChips() {
+      [["The Godfather", "", ""],
+       ["", "Ridley Scott", "Russell Crowe"],
+       ["Spirited Away", "Hayao Miyazaki", ""]].forEach(function (combo) {
+        var names = combo.filter(Boolean);
+        var b = document.createElement("button");
+        b.type = "button"; b.className = "chip";
+        b.textContent = names.join(" + ");
+        b.addEventListener("click", function () {
+          INPUTS.film.value = combo[0]; INPUTS.director.value = combo[1];
+          INPUTS.actor.value = combo[2];
+          refresh();
+          if (!els.run.disabled) recommend();
+        });
+        els.chips.appendChild(b);
+      });
+    }
 
     // 430 KB gzipped is worth deferring until someone scrolls to it, unlike the
     // guardrail's 86 KB which just loads on init.
