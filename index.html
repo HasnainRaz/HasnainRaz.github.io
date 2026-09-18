@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Hasnain Raza | Machine Learning Engineer</title>
-<meta name="description" content="Hasnain Raza — Staff Machine Learning Engineer in Berlin. Generative models, graph neural networks, and ML systems at scale." />
+<meta name="description" content="Hasnain Raza - Staff Machine Learning Engineer in Berlin. Generative models, graph neural networks, and ML systems at scale." />
 <meta name="theme-color" content="#0a0a0b" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -666,6 +666,7 @@
   }
   .fg-edge.lit { stroke-dashoffset: 0; }
   .fg-edge.hop2 { stroke: var(--line-2); }
+  .fg-edge.hop3 { stroke: var(--line-2); }
   .fg-edge.weak { stroke-dasharray: 2 3; stroke-dashoffset: 0; opacity: 0.35; }
   .fg-node { opacity: 0; transition: opacity 0.35s ease; }
   .fg-node.lit { opacity: 1; }
@@ -861,8 +862,8 @@
         <div class="demo-copy">
           <span class="tag">Graph Neural Network · Runs in your browser</span>
           <h3>What Should I Watch?</h3>
-          <p>Name a film you liked, its director, or an actor in it — any two will do. A graph neural network trained on 4,331 films and their crew scores every film in the graph against what you gave it, and shows the crew connections behind each answer.</p>
-          <span class="stat">64-dim embeddings · int8 · no server</span>
+          <p>Give any two of: Film, an actor/actress or a director you like. A graph neural network returns a ranked list of films you might enjoy based on the learned connections.</p>
+          <span class="stat">web demo · mini GNN</span>
         </div>
 
         <div class="fg" data-filmgraph>
@@ -2009,6 +2010,7 @@
           M = { d: d, emb: emb, dim: dim, n: n, er: er, ed: ed, eo: eo,
                 fy: fy, fc: fc, pr: pr, qemb: qemb, qrel: qrel, qrowOf: qrowOf,
                 filmN: filmN, peopleN: peopleN, named: named };
+          M.inv = buildInverse();
 
           Object.keys(INPUTS).forEach(function (k) {
             INPUTS[k].disabled = false;
@@ -2168,87 +2170,158 @@
       return m;
     }
 
+    // person -> films. The shipped adjacency is CSR film -> person, which only
+    // walks inward. Explaining an indirect recommendation means walking OUT
+    // from the person the visitor named, so build the inverse once on load
+    // rather than scanning 63k edges per query.
+    function buildInverse() {
+      var inv = new Array(M.d.people_t.length);
+      for (var i = 0; i < M.n; i++)
+        for (var e = M.eo[i]; e < M.eo[i + 1]; e++) {
+          var q = M.ed[e];
+          (inv[q] || (inv[q] = [])).push(i);
+        }
+      return inv;
+    }
+
+    // Why did this film surface for the crew that was named?
+    //   direct  it lists that person outright
+    //   bridge  someone worked with them on `via`, and is also in this film
+    //   none    no crew path at all — the score came from node features
+    //           (genre, language, era, budget). That is the one signal a
+    //           path-based baseline cannot see, so the row says so plainly
+    //           instead of calling it "no direct link".
+    function explain(rec, used) {
+      var crew = crewOf(rec), out = [];
+      used.forEach(function (u) {
+        if (u.kind === "film" || u.idx2 < 0) return;
+        if (crew.has(u.idx2)) {
+          out.push({ type: "direct", person: u.idx2, rel: crew.get(u.idx2), from: u });
+          return;
+        }
+        var films = M.inv[u.idx2] || [], best = null;
+        for (var k = 0; k < films.length && !best; k++) {
+          var f = films[k];
+          if (f === rec) continue;
+          crewOf(f).forEach(function (rel, person) {
+            if (best || person === u.idx2) return;
+            if (crew.has(person)) best = { person: person, via: f };
+          });
+        }
+        if (best) out.push({ type: "bridge", person: best.person, via: best.via,
+                             rel: crew.get(best.person), from: u });
+      });
+      return out;
+    }
+
     function label(u) {
       return u.kind === "film" ? M.d.film_t[u.idx] : M.d.people_t[u.idx];
     }
 
-    function drawGraph(used, cand) {
-      var W = 600, H = 250, reduce = motionOff();
+    function drawGraph(used, cand, paths) {
+      var H = 250, reduce = motionOff();
       els.svg.innerHTML = "";
       els.viz.hidden = false;
-      var X0 = 52, X1 = 300, X2 = 556, srcY = H / 2;
+      // Four lanes. The third exists because a recommendation often has no edge
+      // to what you named — it is reached through someone who worked with them.
+      // Showing only one hop made those results look like magic.
+      var X0 = 48, X1 = 205, X2 = 385, X3 = 552, srcY = H / 2;
 
-      els.svg.appendChild(el("text", { x: X0, y: 10, class: "fg-lane", "text-anchor": "middle" })).textContent = "your query";
-      els.svg.appendChild(el("text", { x: X1, y: 10, class: "fg-lane", "text-anchor": "middle" })).textContent = "what you named";
-      els.svg.appendChild(el("text", { x: X2, y: 10, class: "fg-lane", "text-anchor": "end" })).textContent = "recommended";
+      function lane(x, txt, anchor) {
+        var t = el("text", { x: x, y: 10, class: "fg-lane",
+                             "text-anchor": anchor || "middle" });
+        t.textContent = txt; els.svg.appendChild(t);
+      }
+      lane(X0, "query"); lane(X1, "you named");
+      lane(X2, "connected by"); lane(X3, "recommended", "end");
 
-      var midY = {}, n = used.length;
-      used.forEach(function (u, k) {
-        midY[k] = 40 + (H - 80) * (n === 1 ? 0.5 : k / (n - 1));
+      function spread(count, pad) {
+        return function (k) {
+          return pad + (H - 2 * pad) * (count === 1 ? 0.5 : k / (count - 1));
+        };
+      }
+      var midAt = spread(used.length, 40), recAt = spread(cand.length, 26);
+      var midY = used.map(function (_, k) { return midAt(k); });
+      var recY = cand.map(function (_, k) { return recAt(k); });
+
+      var bridges = [];
+      paths.forEach(function (ps) {
+        ps.forEach(function (pth) {
+          if (pth.type === "bridge" && bridges.indexOf(pth.person) < 0)
+            bridges.push(pth.person);
+        });
       });
-      var recY = cand.map(function (_, k) {
-        return 26 + (H - 52) * (cand.length === 1 ? 0.5 : k / (cand.length - 1));
-      });
+      var brAt = spread(bridges.length, 34), bridgeY = {};
+      bridges.forEach(function (bp, k) { bridgeY[bp] = brAt(k); });
 
-      var hop1 = [], hop2 = [], nodes1 = [], nodes2 = [];
+      function curve(x1, y1, x2, y2) {
+        var dx = (x2 - x1) * 0.45;
+        return "M" + x1 + "," + y1 + " C" + (x1 + dx) + "," + y1 + " " +
+               (x2 - dx) + "," + y2 + " " + x2 + "," + y2;
+      }
+
+      var hop1 = [], hop2 = [], hop3 = [], nodesA = [], nodesB = [], nodesC = [];
       used.forEach(function (u, k) {
-        var d = "M" + X0 + "," + srcY + " C" + (X0 + 100) + "," + srcY + " " +
-                (X1 - 100) + "," + midY[k] + " " + X1 + "," + midY[k];
-        var e = el("path", { d: d, class: "fg-edge" });
+        var e = el("path", { d: curve(X0, srcY, X1, midY[k]), class: "fg-edge" });
         els.svg.appendChild(e); hop1.push(e);
       });
 
       cand.forEach(function (j, r) {
-        var crew = crewOf(j), any = false;
-        used.forEach(function (u, k) {
-          var hit = u.kind === "film" ? false : crew.has(u.idx2);
-          if (u.kind === "film" && j !== u.idx) hit = false;
-          if (!hit) return;
-          any = true;
-          var d = "M" + X1 + "," + midY[k] + " C" + (X1 + 100) + "," + midY[k] + " " +
-                  (X2 - 100) + "," + recY[r] + " " + X2 + "," + recY[r];
-          var e = el("path", { d: d, class: "fg-edge hop2" });
-          els.svg.appendChild(e); hop2.push(e);
-        });
-        if (!any) {
-          var d0 = "M" + X0 + "," + srcY + " C" + (X0 + 200) + "," + srcY + " " +
-                   (X2 - 200) + "," + recY[r] + " " + X2 + "," + recY[r];
-          els.svg.appendChild(el("path", { d: d0, class: "fg-edge weak" }));
+        var ps = paths[r];
+        if (!ps.length) {
+          els.svg.appendChild(el("path", { d: curve(X0, srcY, X3, recY[r]),
+                                           class: "fg-edge weak" }));
+          return;
         }
+        ps.forEach(function (pth) {
+          var k = used.indexOf(pth.from);
+          if (k < 0) return;
+          if (pth.type === "direct") {
+            var e1 = el("path", { d: curve(X1, midY[k], X3, recY[r]), class: "fg-edge hop2" });
+            els.svg.appendChild(e1); hop2.push(e1);
+          } else {
+            var by = bridgeY[pth.person];
+            var e2 = el("path", { d: curve(X1, midY[k], X2, by), class: "fg-edge hop2" });
+            var e3 = el("path", { d: curve(X2, by, X3, recY[r]), class: "fg-edge hop3" });
+            els.svg.appendChild(e2); els.svg.appendChild(e3);
+            hop2.push(e2); hop3.push(e3);
+          }
+        });
       });
 
-      [hop1, hop2].forEach(function (set) {
+      [hop1, hop2, hop3].forEach(function (set) {
         set.forEach(function (e) { e.style.setProperty("--len", Math.ceil(e.getTotalLength())); });
       });
 
-      var g = el("g", { class: "fg-node src lit" });
-      g.appendChild(el("circle", { cx: X0, cy: srcY, r: 5 }));
-      var t = el("text", { x: X0, y: srcY - 12, "text-anchor": "middle" });
-      t.textContent = used.length + " inputs";
-      g.appendChild(t); els.svg.appendChild(g);
+      function node(cls, x, y, r, txt, ty, anchor) {
+        var g = el("g", { class: "fg-node " + cls });
+        g.appendChild(el("circle", { cx: x, cy: y, r: r }));
+        var t = el("text", { x: x + (anchor === "end" ? -9 : 0), y: ty,
+                             "text-anchor": anchor || "middle" });
+        t.textContent = txt; g.appendChild(t);
+        els.svg.appendChild(g); return g;
+      }
 
+      node("src lit", X0, srcY, 5, used.length + " inputs", srcY - 12);
       used.forEach(function (u, k) {
-        var gg = el("g", { class: "fg-node" });
-        gg.appendChild(el("circle", { cx: X1, cy: midY[k], r: 3.4 }));
-        var tt = el("text", { x: X1 + 8, y: midY[k] });
-        tt.textContent = clip(label(u), 24);
-        gg.appendChild(tt); els.svg.appendChild(gg); nodes1.push(gg);
+        nodesA.push(node("", X1, midY[k], 3.4, clip(label(u), 20), midY[k] - 9));
       });
-
+      bridges.forEach(function (bp) {
+        nodesC.push(node("", X2, bridgeY[bp], 3, clip(M.d.people_t[bp], 18), bridgeY[bp] - 8));
+      });
       cand.forEach(function (j, r) {
-        var gg = el("g", { class: "fg-node rec" });
-        gg.appendChild(el("circle", { cx: X2, cy: recY[r], r: 4 }));
-        var tt = el("text", { x: X2 - 9, y: recY[r], "text-anchor": "end" });
-        tt.textContent = (r + 1) + "  " + clip(M.d.film_t[j], 24);
-        gg.appendChild(tt); els.svg.appendChild(gg); nodes2.push(gg);
+        nodesB.push(node("rec", X3, recY[r], 4,
+                         (r + 1) + "  " + clip(M.d.film_t[j], 22), recY[r], "end"));
       });
 
       var at = function (ms, fn) { setTimeout(fn, reduce ? 0 : ms); };
-      at(20,  function () { hop1.forEach(function (e) { e.classList.add("lit"); }); });
-      at(320, function () { nodes1.forEach(function (x) { x.classList.add("lit"); }); });
-      at(560, function () { hop2.forEach(function (e) { e.classList.add("lit"); }); });
-      at(900, function () { nodes2.forEach(function (x) { x.classList.add("lit"); }); });
-      return reduce ? 0 : 1000;
+      at(20,   function () { hop1.forEach(function (e) { e.classList.add("lit"); }); });
+      at(300,  function () { nodesA.forEach(function (x) { x.classList.add("lit"); }); });
+      at(520,  function () { hop2.forEach(function (e) { e.classList.add("lit"); }); });
+      at(820,  function () { nodesC.forEach(function (x) { x.classList.add("lit"); }); });
+      at(1020, function () { hop3.forEach(function (e) { e.classList.add("lit"); }); });
+      at(1320, function () { nodesB.forEach(function (x) { x.classList.add("lit"); }); });
+      return reduce ? 0 : 1400;
     }
 
     var runSeq = 0;
@@ -2265,26 +2338,32 @@
       // bridge two index spaces that no longer differ.
       res.used.forEach(function (u) { u.idx2 = u.kind === "film" ? -1 : u.idx; });
 
-      var delay = drawGraph(res.used, cand);
+      // One source of truth: the same paths drive the picture and the prose.
+      var paths = cand.map(function (j) { return explain(j, res.used); });
+      var delay = drawGraph(res.used, cand, paths);
       els.out.innerHTML = "";
       var rows = cand.map(function (j, rank) {
         var crew = crewOf(j), bits = [];
-        res.used.forEach(function (u) {
-          if (u.kind === "film") return;
-          if (u.idx2 >= 0 && crew.has(u.idx2)) {
+        paths[rank].forEach(function (pth) {
+          if (pth.type === "direct") {
             bits.push('<span class="rel">' +
-              (u.kind === "director" ? "directed by" : "features") + ":</span> <b>" +
-              M.d.people_t[u.idx2] + "</b>");
+              (pth.from.kind === "director" ? "directed by" : "features") +
+              ":</span> <b>" + M.d.people_t[pth.person] + "</b>");
+          } else {
+            // name every node the connection actually travelled through
+            bits.push('<span class="rel">via</span> <b>' + M.d.people_t[pth.person] +
+              '</b> <span class="rel">\u2014 with ' + M.d.people_t[pth.from.idx] +
+              " on " + M.d.film_t[pth.via] + "</span>");
           }
         });
         if (FIELDS.film !== null) {
           var mine = crewOf(FIELDS.film), sh = [];
-          crew.forEach(function (rel, p) { if (mine.has(p)) sh.push(p); });
+          crew.forEach(function (rel, q) { if (mine.has(q)) sh.push(q); });
           if (sh.length) bits.push('<span class="rel">shares ' + sh.length +
             " crew with " + M.d.film_t[FIELDS.film] + "</span>");
         }
         var why = bits.length ? bits.slice(0, 3).join(" \u00b7 ")
-          : '<span class="rel">predicted by the model — no direct crew link</span>';
+          : '<span class="rel">no crew path \u2014 matched on genre, language and era</span>';
         var row = document.createElement("div");
         row.className = "fg-row";
         row.innerHTML =
